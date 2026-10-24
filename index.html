@@ -11,9 +11,10 @@
       html,
       body {
         margin: 0;
-        height: 100%;
       }
       body {
+        min-height: 100vh;
+        min-height: 100dvh;
         background: #2a211b;
         color: #f1e6cf;
         font-family:
@@ -32,7 +33,11 @@
       #status {
         font-size: 1.15rem;
         font-weight: 600;
-        min-height: 1.5em;
+        min-height: 2.9em;
+        width: min(94vw, 560px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
         text-align: center;
       }
       .board {
@@ -111,8 +116,12 @@
         font-weight: 600;
         cursor: pointer;
       }
-      button:hover {
+      button:hover:not(:disabled) {
         background: #fff;
+      }
+      button:disabled {
+        opacity: 0.4;
+        cursor: default;
       }
       button:focus-visible,
       input:focus-visible {
@@ -150,10 +159,13 @@
   <body>
     <div id="status"></div>
     <div class="board" id="board"></div>
-    <div class="bar">
+    <div class="bar" id="bar">
       <button id="bNew">Yangi o'yin</button>
       <button id="bUndo">Yurishni qaytarish</button>
       <button id="bOnline">Do'st bilan online</button>
+    </div>
+    <div class="bar" id="ask" style="display: none">
+      <button id="bYes">Ha</button><button id="bNo">Yo'q</button>
     </div>
     <div id="linkbox">
       <input id="link" readonly /><button id="bCopy">Nusxa olish</button>
@@ -306,35 +318,42 @@
         render();
       }
 
-      function undo(send) {
-        if (!hist.length) return;
-        const h = hist.pop();
+      // Oxirgi n ta yurishni qaytaradi
+      function undoN(n) {
+        let h;
+        while (n-- > 0 && hist.length) h = hist.pop();
+        if (!h) return;
         B = JSON.parse(h.B);
         turn = h.turn;
         quiet = h.quiet;
         over = null;
         sel = [];
-        if (send && conn && conn.open) conn.send({ t: "u" });
-        render();
       }
 
-      function newGame(send) {
-        init();
-        if (send && conn && conn.open) conn.send({ t: "n" });
-        render();
+      // O'z yurishimni qaytarish uchun nechta yurish kerak (do'st yurgan bo'lsa, 2 ta)
+      function undoCount() {
+        for (let i = hist.length - 1; i >= 0; i--)
+          if (hist[i].turn === me) return hist.length - i;
+        return 0;
       }
 
       // ---------- Interfeys ----------
       let me = null; // null = bitta qurilma, 'w' yoki 'b' = online
-      const boardEl = document.getElementById("board"),
-        statusEl = document.getElementById("status");
+      const $ = (id) => document.getElementById(id);
+      const boardEl = $("board"),
+        statusEl = $("status"),
+        barEl = $("bar"),
+        askEl = $("ask"),
+        bUndo = $("bUndo"),
+        bNew = $("bNew"),
+        bCopy = $("bCopy");
 
       function same(a, b) {
         return a[0] === b[0] && a[1] === b[1];
       }
 
       function click(r, c) {
-        if (over || (me && turn !== me)) return;
+        if (over || busy() || (me && turn !== me)) return;
         const ms = legal(turn),
           n = sel.length;
         const cand = n
@@ -358,7 +377,7 @@
 
       function render() {
         const flip = me === "b";
-        const ms = over || (me && turn !== me) ? [] : legal(turn);
+        const ms = over || busy() || (me && turn !== me) ? [] : legal(turn);
         const n = sel.length;
         const next = n
           ? ms
@@ -403,23 +422,80 @@
               : "Do'stingiz yurmoqda";
         else s = name(turn) + " yuradi";
         if (extra && !over) s = extra;
+        if (pending) s = "Do'stingizning javobi kutilmoqda...";
+        if (note) s = note;
+        if (incoming)
+          s =
+            incoming.k === "u"
+              ? "Do'stingiz yurishini qaytarmoqchi" +
+                (incoming.n > 1
+                  ? ", sizning oxirgi yurishingiz ham qaytadi"
+                  : "") +
+                ". Ruxsat berasizmi?"
+              : "Do'stingiz yangi o'yin boshlamoqchi. Rozimisiz?";
         statusEl.textContent = s;
+        barEl.style.display = incoming ? "none" : "flex";
+        askEl.style.display = incoming ? "flex" : "none";
+        bUndo.disabled = busy() || (me ? !undoCount() : !hist.length);
+        bNew.disabled = busy();
       }
 
       // ---------- Online (PeerJS, server shart emas) ----------
       let peer = null,
         conn = null,
-        extra = "";
+        extra = "",
+        pending = null,
+        incoming = null,
+        note = "";
+      const busy = () => !!(pending || incoming);
       const linkBox = document.getElementById("linkbox"),
         linkInp = document.getElementById("link");
 
+      function flash(t) {
+        note = t;
+        render();
+        setTimeout(() => {
+          if (note === t) {
+            note = "";
+            render();
+          }
+        }, 3000);
+      }
+
+      // Do'stdan ruxsat so'rash (yurishni qaytarish yoki yangi o'yin)
+      function request(q) {
+        conn.send({ t: "q", s: hist.length, ...q });
+        const p = (pending = { k: q.k, n: q.n });
+        render();
+        setTimeout(() => {
+          if (pending !== p) return;
+          pending = null;
+          if (conn.open) conn.send({ t: "x" });
+          flash("Javob kelmadi");
+        }, 30000);
+      }
+
+      function answer(ok) {
+        const q = incoming;
+        if (!q) return;
+        incoming = null;
+        conn.send({ t: "a", ok });
+        if (ok) {
+          if (q.k === "u") undoN(q.n);
+          else init();
+        }
+        render();
+      }
+
       function wire(c) {
         conn = c;
-        c.on("open", () => {
+        const start = () => {
           extra = "";
           init();
           render();
-        });
+        };
+        if (c.open) start();
+        else c.on("open", start);
         c.on("data", (d) => {
           if (d.t === "m") {
             const m = legal(turn).find(
@@ -428,10 +504,37 @@
                 m.path.every((s, i) => same(s, d.path[i])),
             );
             if (m) play(m, false);
-          } else if (d.t === "u") undo(false);
-          else if (d.t === "n") newGame(false);
+          } else if (d.t === "n") {
+            init();
+            render();
+          } else if (d.t === "q") {
+            if (pending || incoming || d.s !== hist.length)
+              c.send({ t: "a", ok: false, st: 1 });
+            else {
+              incoming = d;
+              render();
+            }
+          } else if (d.t === "a") {
+            const p = pending;
+            if (!p) return;
+            pending = null;
+            if (d.ok) {
+              if (p.k === "u") undoN(p.n);
+              else init();
+              render();
+            } else
+              flash(
+                d.st
+                  ? "Hozir bo'lmadi, qayta urinib ko'ring"
+                  : "Do'stingiz rad etdi",
+              );
+          } else if (d.t === "x") {
+            incoming = null;
+            render();
+          }
         });
         c.on("close", () => {
+          pending = incoming = null;
           extra = "Do'st uzildi";
           render();
         });
@@ -445,11 +548,16 @@
         peer.on("open", (id) => {
           linkInp.value = location.href.split("#")[0] + "#" + id;
           linkBox.style.display = "flex";
+          $("bOnline").style.display = "none";
           extra = "Havolani do'stingizga yuboring va kuting";
           render();
           copyLink();
         });
         peer.on("connection", (c) => {
+          if (conn && conn.open) {
+            c.close();
+            return;
+          }
           me = "w";
           wire(c);
         });
@@ -464,7 +572,7 @@
         me = "b";
         render();
         peer = new Peer();
-        peer.on("open", () => wire(peer.connect(id)));
+        peer.on("open", () => wire(peer.connect(id, { reliable: true })));
         peer.on("error", () => {
           extra = "Ulanib bo'lmadi. Havola eskirgan bo'lishi mumkin";
           render();
@@ -473,15 +581,37 @@
 
       function copyLink() {
         linkInp.select();
+        const done = () => {
+          bCopy.textContent = "Nusxalandi";
+          setTimeout(() => (bCopy.textContent = "Nusxa olish"), 1500);
+        };
         try {
-          navigator.clipboard.writeText(linkInp.value);
+          navigator.clipboard.writeText(linkInp.value).then(done, () => {});
         } catch (e) {}
       }
 
-      document.getElementById("bNew").onclick = () => newGame(true);
-      document.getElementById("bUndo").onclick = () => undo(true);
-      document.getElementById("bOnline").onclick = startHost;
-      document.getElementById("bCopy").onclick = copyLink;
+      bNew.onclick = () => {
+        if (me && conn && conn.open && !over && hist.length)
+          request({ k: "n" });
+        else {
+          init();
+          if (me && conn && conn.open) conn.send({ t: "n" });
+          render();
+        }
+      };
+      bUndo.onclick = () => {
+        if (!me) {
+          undoN(1);
+          render();
+        } else if (conn && conn.open) {
+          const n = undoCount();
+          if (n) request({ k: "u", n });
+        }
+      };
+      $("bOnline").onclick = startHost;
+      bCopy.onclick = copyLink;
+      $("bYes").onclick = () => answer(true);
+      $("bNo").onclick = () => answer(false);
 
       init();
       if (location.hash.length > 1) {
