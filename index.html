@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="uz">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shashka</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+      body {
+        background: #2a211b;
+        color: #f1e6cf;
+        font-family:
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        padding: 12px;
+      }
+      #status {
+        font-size: 1.15rem;
+        font-weight: 600;
+        min-height: 1.5em;
+        text-align: center;
+      }
+      .board {
+        display: grid;
+        grid-template-columns: repeat(8, 1fr);
+        width: min(94vw, 70vh, 560px);
+        aspect-ratio: 1;
+        border: 8px solid #4a3426;
+        border-radius: 4px;
+        user-select: none;
+      }
+      .sq {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .l {
+        background: #f1e6cf;
+      }
+      .d {
+        background: #c4622d;
+      }
+      .d {
+        cursor: pointer;
+      }
+      .sq.m {
+        box-shadow: inset 0 0 0 3px rgba(255, 214, 102, 0.85);
+      }
+      .sq.s {
+        box-shadow: inset 0 0 0 4px #ffd666;
+        background: #d4733d;
+      }
+      .sq.t::after {
+        content: "";
+        width: 28%;
+        height: 28%;
+        border-radius: 50%;
+        background: rgba(255, 214, 102, 0.95);
+      }
+      .p {
+        position: relative;
+        width: 80%;
+        height: 80%;
+        border-radius: 50%;
+        box-shadow:
+          0 3px 5px rgba(0, 0, 0, 0.45),
+          inset 0 0 0 3px rgba(0, 0, 0, 0.12);
+      }
+      .p.w {
+        background: radial-gradient(circle at 35% 30%, #fff, #ddd3be);
+      }
+      .p.b {
+        background: radial-gradient(circle at 35% 30%, #5a5a5a, #111);
+      }
+      .p.k::after {
+        content: "";
+        position: absolute;
+        inset: 24%;
+        border-radius: 50%;
+        border: 3px solid #e0a82e;
+      }
+      .bar {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      button {
+        font: inherit;
+        padding: 10px 16px;
+        border: 0;
+        border-radius: 8px;
+        background: #f1e6cf;
+        color: #2a211b;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #fff;
+      }
+      button:focus-visible,
+      input:focus-visible {
+        outline: 3px solid #ffd666;
+        outline-offset: 2px;
+      }
+      #linkbox {
+        display: none;
+        gap: 8px;
+        width: min(94vw, 560px);
+      }
+      footer {
+        font-size: 0.9rem;
+        opacity: 0.75;
+      }
+      footer a {
+        color: inherit;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+      footer a:hover {
+        opacity: 1;
+        color: #ffd666;
+      }
+      #link {
+        flex: 1;
+        min-width: 0;
+        padding: 10px;
+        border-radius: 8px;
+        border: 0;
+        font: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="status"></div>
+    <div class="board" id="board"></div>
+    <div class="bar">
+      <button id="bNew">Yangi o'yin</button>
+      <button id="bUndo">Yurishni qaytarish</button>
+      <button id="bOnline">Do'st bilan online</button>
+    </div>
+    <div id="linkbox">
+      <input id="link" readonly /><button id="bCopy">Nusxa olish</button>
+    </div>
+
+    <footer>
+      <a href="https://t.me/Sardorbek0limov" target="_blank" rel="noopener"
+        >Created by Sardorbek Olimov</a
+      >
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+    <script>
+      // ---------- O'yin qoidalari (rus shashkasi) ----------
+      const DIRS = [
+        [-1, -1],
+        [-1, 1],
+        [1, -1],
+        [1, 1],
+      ];
+      const on = (r, c) => r >= 0 && r < 8 && c >= 0 && c < 8;
+      const side = (p) => (p || "").toLowerCase();
+      const isKing = (p) => !!p && p < "a";
+      let B, turn, hist, sel, quiet, over;
+
+      function init() {
+        B = Array.from({ length: 8 }, (_, r) =>
+          Array.from({ length: 8 }, (_, c) =>
+            (r + c) % 2 ? (r < 3 ? "b" : r > 4 ? "w" : "") : "",
+          ),
+        );
+        turn = "w";
+        hist = [];
+        sel = [];
+        quiet = 0;
+        over = null;
+      }
+
+      // Urib olish ketma-ketliklari (damka uzoqdan uradi, dona orqaga ham uradi)
+      function jumps(r, c, p, caps, path, out) {
+        const k = isKing(p),
+          t = side(p),
+          en = t === "w" ? "b" : "w";
+        let found = false;
+        for (const [dr, dc] of DIRS) {
+          let y = r + dr,
+            x = c + dc;
+          if (k)
+            while (on(y, x) && !B[y][x]) {
+              y += dr;
+              x += dc;
+            }
+          if (
+            !on(y, x) ||
+            side(B[y][x]) !== en ||
+            caps.some((q) => q[0] === y && q[1] === x)
+          )
+            continue;
+          const cy = y,
+            cx = x;
+          y += dr;
+          x += dc;
+          const opts = [];
+          while (on(y, x) && !B[y][x]) {
+            const promote = !k && (t === "w" ? y === 0 : y === 7);
+            const np = promote ? p.toUpperCase() : p;
+            const nc = [...caps, [cy, cx]],
+              npath = [...path, [y, x]],
+              sub = [];
+            const cont = jumps(y, x, np, nc, npath, sub);
+            opts.push({ cont, sub, term: { path: npath, caps: nc } });
+            if (!k) break;
+            y += dr;
+            x += dc;
+          }
+          const anyCont = opts.some((o) => o.cont);
+          for (const o of opts) {
+            if (anyCont && !o.cont) continue; // davom ettirish mumkin bo'lsa, davom ettirish shart
+            found = true;
+            if (o.cont) out.push(...o.sub);
+            else out.push(o.term);
+          }
+        }
+        return found;
+      }
+
+      function legal(t) {
+        const caps = [],
+          simple = [];
+        for (let r = 0; r < 8; r++)
+          for (let c = 0; c < 8; c++) {
+            const p = B[r][c];
+            if (side(p) !== t) continue;
+            B[r][c] = "";
+            jumps(r, c, p, [], [[r, c]], caps);
+            B[r][c] = p;
+            if (isKing(p)) {
+              for (const [dr, dc] of DIRS) {
+                let y = r + dr,
+                  x = c + dc;
+                while (on(y, x) && !B[y][x]) {
+                  simple.push({
+                    path: [
+                      [r, c],
+                      [y, x],
+                    ],
+                    caps: [],
+                  });
+                  y += dr;
+                  x += dc;
+                }
+              }
+            } else {
+              const dr = t === "w" ? -1 : 1;
+              for (const dc of [-1, 1])
+                if (on(r + dr, c + dc) && !B[r + dr][c + dc])
+                  simple.push({
+                    path: [
+                      [r, c],
+                      [r + dr, c + dc],
+                    ],
+                    caps: [],
+                  });
+            }
+          }
+        return caps.length ? caps : simple;
+      }
+
+      function apply(m) {
+        const [r, c] = m.path[0],
+          p = B[r][c];
+        B[r][c] = "";
+        m.caps.forEach(([y, x]) => (B[y][x] = ""));
+        const [dy, dx] = m.path[m.path.length - 1];
+        const last = side(p) === "w" ? 0 : 7;
+        const crowned = !isKing(p) && m.path.some((s) => s[0] === last);
+        B[dy][dx] = crowned ? p.toUpperCase() : p;
+        quiet = m.caps.length || !isKing(p) ? 0 : quiet + 1;
+        const mover = turn;
+        turn = turn === "w" ? "b" : "w";
+        if (!legal(turn).length) over = mover;
+        else if (quiet >= 30) over = "draw";
+      }
+
+      function play(m, send) {
+        hist.push({ B: JSON.stringify(B), turn, quiet });
+        apply(m);
+        sel = [];
+        if (send && conn && conn.open) conn.send({ t: "m", path: m.path });
+        render();
+      }
+
+      function undo(send) {
+        if (!hist.length) return;
+        const h = hist.pop();
+        B = JSON.parse(h.B);
+        turn = h.turn;
+        quiet = h.quiet;
+        over = null;
+        sel = [];
+        if (send && conn && conn.open) conn.send({ t: "u" });
+        render();
+      }
+
+      function newGame(send) {
+        init();
+        if (send && conn && conn.open) conn.send({ t: "n" });
+        render();
+      }
+
+      // ---------- Interfeys ----------
+      let me = null; // null = bitta qurilma, 'w' yoki 'b' = online
+      const boardEl = document.getElementById("board"),
+        statusEl = document.getElementById("status");
+
+      function same(a, b) {
+        return a[0] === b[0] && a[1] === b[1];
+      }
+
+      function click(r, c) {
+        if (over || (me && turn !== me)) return;
+        const ms = legal(turn),
+          n = sel.length;
+        const cand = n
+          ? ms.filter(
+              (m) =>
+                sel.every((s, i) => same(m.path[i], s)) &&
+                m.path[n] &&
+                same(m.path[n], [r, c]),
+            )
+          : [];
+        if (cand.length) {
+          sel.push([r, c]);
+          const done = cand.find((m) => m.path.length === sel.length);
+          if (done) play(done, true);
+          else render();
+          return;
+        }
+        sel = ms.some((m) => same(m.path[0], [r, c])) ? [[r, c]] : [];
+        render();
+      }
+
+      function render() {
+        const flip = me === "b";
+        const ms = over || (me && turn !== me) ? [] : legal(turn);
+        const n = sel.length;
+        const next = n
+          ? ms
+              .filter(
+                (m) => sel.every((s, i) => same(m.path[i], s)) && m.path[n],
+              )
+              .map((m) => m.path[n])
+          : [];
+        boardEl.innerHTML = "";
+        for (let i = 0; i < 8; i++)
+          for (let j = 0; j < 8; j++) {
+            const r = flip ? 7 - i : i,
+              c = flip ? 7 - j : j;
+            const el = document.createElement("div");
+            el.className = "sq " + ((r + c) % 2 ? "d" : "l");
+            if (!n && ms.some((m) => same(m.path[0], [r, c])))
+              el.classList.add("m");
+            if (sel.some((s) => same(s, [r, c]))) el.classList.add("s");
+            if (next.some((s) => same(s, [r, c]))) el.classList.add("t");
+            const p = B[r][c];
+            if (p) {
+              const d = document.createElement("div");
+              d.className = "p " + side(p) + (isKing(p) ? " k" : "");
+              el.appendChild(d);
+            }
+            el.onclick = () => click(r, c);
+            boardEl.appendChild(el);
+          }
+        const name = (t) => (t === "w" ? "Oq" : "Qora");
+        let s;
+        if (over === "draw") s = "Durang";
+        else if (over)
+          s = me
+            ? over === me
+              ? "Siz yutdingiz!"
+              : "Do'stingiz yutdi"
+            : name(over) + " yutdi!";
+        else if (me)
+          s =
+            turn === me
+              ? "Sizning yurishingiz (" + name(me).toLowerCase() + ")"
+              : "Do'stingiz yurmoqda";
+        else s = name(turn) + " yuradi";
+        if (extra && !over) s = extra;
+        statusEl.textContent = s;
+      }
+
+      // ---------- Online (PeerJS, server shart emas) ----------
+      let peer = null,
+        conn = null,
+        extra = "";
+      const linkBox = document.getElementById("linkbox"),
+        linkInp = document.getElementById("link");
+
+      function wire(c) {
+        conn = c;
+        c.on("open", () => {
+          extra = "";
+          init();
+          render();
+        });
+        c.on("data", (d) => {
+          if (d.t === "m") {
+            const m = legal(turn).find(
+              (m) =>
+                m.path.length === d.path.length &&
+                m.path.every((s, i) => same(s, d.path[i])),
+            );
+            if (m) play(m, false);
+          } else if (d.t === "u") undo(false);
+          else if (d.t === "n") newGame(false);
+        });
+        c.on("close", () => {
+          extra = "Do'st uzildi";
+          render();
+        });
+      }
+
+      function startHost() {
+        if (peer) return;
+        extra = "Havola tayyorlanmoqda...";
+        render();
+        peer = new Peer();
+        peer.on("open", (id) => {
+          linkInp.value = location.href.split("#")[0] + "#" + id;
+          linkBox.style.display = "flex";
+          extra = "Havolani do'stingizga yuboring va kuting";
+          render();
+          copyLink();
+        });
+        peer.on("connection", (c) => {
+          me = "w";
+          wire(c);
+        });
+        peer.on("error", () => {
+          extra = "Ulanishda xato. Sahifani yangilab qayta urinib ko'ring";
+          render();
+        });
+      }
+
+      function join(id) {
+        extra = "Ulanmoqda...";
+        me = "b";
+        render();
+        peer = new Peer();
+        peer.on("open", () => wire(peer.connect(id)));
+        peer.on("error", () => {
+          extra = "Ulanib bo'lmadi. Havola eskirgan bo'lishi mumkin";
+          render();
+        });
+      }
+
+      function copyLink() {
+        linkInp.select();
+        try {
+          navigator.clipboard.writeText(linkInp.value);
+        } catch (e) {}
+      }
+
+      document.getElementById("bNew").onclick = () => newGame(true);
+      document.getElementById("bUndo").onclick = () => undo(true);
+      document.getElementById("bOnline").onclick = startHost;
+      document.getElementById("bCopy").onclick = copyLink;
+
+      init();
+      if (location.hash.length > 1) {
+        document.getElementById("bOnline").style.display = "none";
+        join(location.hash.slice(1));
+      }
+      render();
+    </script>
+  </body>
+</html>
