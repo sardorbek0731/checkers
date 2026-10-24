@@ -162,6 +162,7 @@
     <div class="bar" id="bar">
       <button id="bNew">Yangi o'yin</button>
       <button id="bUndo">Yurishni qaytarish</button>
+      <button id="bDraw">Durang taklif qilish</button>
       <button id="bOnline">Do'st bilan online</button>
     </div>
     <div class="bar" id="ask" style="display: none">
@@ -346,6 +347,7 @@
         askEl = $("ask"),
         bUndo = $("bUndo"),
         bNew = $("bNew"),
+        bDraw = $("bDraw"),
         bCopy = $("bCopy");
 
       function same(a, b) {
@@ -432,12 +434,15 @@
                   ? ", sizning oxirgi yurishingiz ham qaytadi"
                   : "") +
                 ". Ruxsat berasizmi?"
-              : "Do'stingiz yangi o'yin boshlamoqchi. Rozimisiz?";
+              : incoming.k === "d"
+                ? "Do'stingiz durang taklif qilmoqda. Rozimisiz?"
+                : "Do'stingiz yangi o'yin boshlamoqchi. Rozimisiz?";
         statusEl.textContent = s;
         barEl.style.display = incoming ? "none" : "flex";
         askEl.style.display = incoming ? "flex" : "none";
         bUndo.disabled = busy() || (me ? !undoCount() : !hist.length);
         bNew.disabled = busy();
+        bDraw.disabled = busy() || !!over || !hist.length;
       }
 
       // ---------- Online (PeerJS, server shart emas) ----------
@@ -462,7 +467,7 @@
         }, 3000);
       }
 
-      // Do'stdan ruxsat so'rash (yurishni qaytarish yoki yangi o'yin)
+      // Do'stdan ruxsat so'rash (yurishni qaytarish, yangi o'yin yoki durang)
       function request(q) {
         conn.send({ t: "q", s: hist.length, ...q });
         const p = (pending = { k: q.k, n: q.n });
@@ -475,15 +480,22 @@
         }, 30000);
       }
 
+      // Rozilikdan keyin: u = yurishni qaytarish, n = yangi o'yin, d = durang
+      function accept(k, n) {
+        if (k === "u") undoN(n);
+        else if (k === "n") init();
+        else {
+          over = "draw";
+          sel = [];
+        }
+      }
+
       function answer(ok) {
         const q = incoming;
         if (!q) return;
         incoming = null;
         conn.send({ t: "a", ok });
-        if (ok) {
-          if (q.k === "u") undoN(q.n);
-          else init();
-        }
+        if (ok) accept(q.k, q.n);
         render();
       }
 
@@ -519,8 +531,7 @@
             if (!p) return;
             pending = null;
             if (d.ok) {
-              if (p.k === "u") undoN(p.n);
-              else init();
+              accept(p.k, p.n);
               render();
             } else
               flash(
@@ -607,6 +618,12 @@
           const n = undoCount();
           if (n) request({ k: "u", n });
         }
+      };
+      bDraw.onclick = () => {
+        if (!me) {
+          accept("d");
+          render();
+        } else if (conn && conn.open) request({ k: "d" });
       };
       $("bOnline").onclick = startHost;
       bCopy.onclick = copyLink;
