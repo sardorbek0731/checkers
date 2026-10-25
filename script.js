@@ -390,11 +390,48 @@ function wire(c) {
   });
 }
 
+const PEER_OPTS = {
+  config: {
+    iceServers: [
+      { urls: "stun:stun.relay.metered.ca:80" },
+      {
+        urls: "turn:global.relay.metered.ca:80",
+        username: "4ce13290350ff1541331c829",
+        credential: "Rkyd9yklycYIeVxV",
+      },
+      {
+        urls: "turn:global.relay.metered.ca:80?transport=tcp",
+        username: "4ce13290350ff1541331c829",
+        credential: "Rkyd9yklycYIeVxV",
+      },
+      {
+        urls: "turn:global.relay.metered.ca:443",
+        username: "4ce13290350ff1541331c829",
+        credential: "Rkyd9yklycYIeVxV",
+      },
+      {
+        urls: "turns:global.relay.metered.ca:443?transport=tcp",
+        username: "4ce13290350ff1541331c829",
+        credential: "Rkyd9yklycYIeVxV",
+      },
+    ],
+  },
+};
+
+function peerError(e, text) {
+  console.log("PEER ERROR:", e.type, e);
+  extra =
+    e.type === "peer-unavailable"
+      ? "Havola eskirgan. Do'stingizdan yangi havola so'rang"
+      : text + " (" + e.type + ")";
+  render();
+}
+
 function startHost() {
   if (peer) return;
   extra = "Havola tayyorlanmoqda...";
   render();
-  peer = new Peer();
+  peer = new Peer(PEER_OPTS);
   peer.on("open", (id) => {
     linkInp.value = location.href.split("#")[0] + "#" + id;
     linkBox.style.display = "flex";
@@ -414,21 +451,32 @@ function startHost() {
     me = myColor;
     wire(c);
   });
-  peer.on("error", () => {
-    extra = "Ulanishda xato. Sahifani yangilab qayta urinib ko'ring";
-    render();
-  });
+  peer.on("error", (e) =>
+    peerError(e, "Ulanishda xato. Sahifani yangilab qayta urinib ko'ring"),
+  );
 }
 
 function join(id) {
   extra = "Ulanmoqda...";
   render();
-  peer = new Peer();
-  peer.on("open", () => wire(peer.connect(id, { reliable: true })));
-  peer.on("error", () => {
-    extra = "Ulanib bo'lmadi. Havola eskirgan bo'lishi mumkin";
-    render();
+  peer = new Peer(PEER_OPTS);
+  peer.on("open", () => {
+    const c = peer.connect(id, { reliable: true });
+    // 20 soniyada ulanmasa, foydalanuvchiga aytamiz (qotib qolmasin)
+    const t = setTimeout(() => {
+      if (!c.open) {
+        extra =
+          "Ulanib bo'lmadi. Tarmoq to'sqinlik qilmoqda yoki havola eskirgan";
+        render();
+      }
+    }, 20000);
+    c.on("open", () => clearTimeout(t));
+    c.on("error", (e) => console.log("CONN ERROR:", e));
+    wire(c);
   });
+  peer.on("error", (e) =>
+    peerError(e, "Ulanib bo'lmadi. Havola eskirgan bo'lishi mumkin"),
+  );
 }
 
 function copyLink() {
