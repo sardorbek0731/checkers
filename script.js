@@ -170,6 +170,7 @@ const boardEl = $("board"),
   bUndo = $("bUndo"),
   bNew = $("bNew"),
   bDraw = $("bDraw"),
+  bResign = $("bResign"),
   bCopy = $("bCopy"),
   scoreEl = $("score"),
   pickEl = $("pick");
@@ -274,9 +275,12 @@ function render() {
       " Do'stingiz (" +
       name(other(me)).toLowerCase() +
       ")";
-  bUndo.disabled = busy() || !!over || (me ? !undoCount() : !hist.length);
-  bNew.disabled = busy() || !hist.length;
-  bDraw.disabled = busy() || !!over || !hist.length;
+  const gone = me && !(conn && conn.open);
+  bUndo.disabled =
+    busy() || !!over || gone || (me ? !undoCount() : !hist.length);
+  bNew.disabled = busy() || !hist.length || gone;
+  bDraw.disabled = busy() || !!over || !hist.length || gone;
+  bResign.disabled = busy() || !!over || !hist.length || gone;
 }
 
 // ---------- Online (PeerJS, server shart emas) ----------
@@ -327,6 +331,14 @@ function accept(k, n) {
   }
 }
 
+// loser taslim bo'ldi: g'olib boshqa tomon
+function resign(loser) {
+  if (over) return;
+  over = other(loser);
+  sel = [];
+  if (me) score[over === me ? "me" : "fr"]++;
+}
+
 function answer(ok) {
   const q = incoming;
   if (!q) return;
@@ -361,7 +373,7 @@ function wire(c) {
       init();
       render();
     } else if (d.t === "q") {
-      if (pending || incoming || d.s !== hist.length)
+      if (over || pending || incoming || d.s !== hist.length)
         c.send({ t: "a", ok: false, st: 1 });
       else {
         incoming = d;
@@ -378,6 +390,10 @@ function wire(c) {
         flash(
           d.st ? "Hozir bo'lmadi, qayta urinib ko'ring" : "Do'stingiz rad etdi",
         );
+    } else if (d.t === "r") {
+      pending = incoming = null;
+      resign(other(me));
+      render();
     } else if (d.t === "x") {
       incoming = null;
       render();
@@ -519,6 +535,17 @@ bDraw.onclick = () => {
     accept("d");
     render();
   } else if (conn && conn.open) request({ k: "d" });
+};
+bResign.onclick = () => {
+  if (!confirm("Taslim bo'lasizmi?")) return;
+  if (!me) {
+    resign(turn); // bitta qurilmada: yurayotgan tomon taslim bo'ladi
+    render();
+  } else if (conn && conn.open) {
+    conn.send({ t: "r" });
+    resign(me);
+    render();
+  }
 };
 $("bOnline").onclick = () => {
   picking = true;
